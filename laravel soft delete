@@ -1,0 +1,181 @@
+I'll explain soft delete in Laravel with examples:
+
+First, ensure your model uses the SoftDeletes trait:
+
+php
+
+Copy
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class CarServiceRepairItems extends Model
+{
+    use SoftDeletes;  // Add this trait
+    
+    // ... rest of your model code
+}
+Make sure your table has a deleted_at column:
+
+php
+
+Copy
+// In your migration file
+Schema::create('car_service_repair_items', function (Blueprint $table) {
+    $table->id();
+    // ... other columns
+    $table->softDeletes(); // Adds deleted_at column
+    $table->timestamps();
+});
+Now, here are different ways to use soft delete:
+
+php
+
+Copy
+// 1. Basic soft delete
+$repairItem = CarServiceRepairItems::find(1);
+$repairItem->delete();  // This will set deleted_at timestamp
+
+// 2. Soft delete with specific timestamp
+$repairItem->delete(Carbon::now());
+
+// 3. Force delete (permanent deletion)
+$repairItem->forceDelete();
+
+// 4. Bulk soft delete
+CarServiceRepairItems::where('job_number', 'JOB001')->delete();
+
+// 5. Restore soft deleted record
+$repairItem->restore();
+
+// QUERYING SOFT DELETED RECORDS
+
+// 1. Get only non-deleted records (default behavior)
+$activeItems = CarServiceRepairItems::all();
+
+// 2. Get only soft deleted records
+$deletedItems = CarServiceRepairItems::onlyTrashed()->get();
+
+// 3. Get both active and soft deleted records
+$allItems = CarServiceRepairItems::withTrashed()->get();
+
+// 4. Check if record is soft deleted
+if ($repairItem->trashed()) {
+    // Record is soft deleted
+}
+
+// 5. Restore multiple records
+CarServiceRepairItems::onlyTrashed()
+    ->where('job_number', 'JOB001')
+    ->restore();
+
+// 6. Force delete multiple records
+CarServiceRepairItems::onlyTrashed()
+    ->where('job_number', 'JOB001')
+    ->forceDelete();
+
+// 7. Relationships with soft deletes
+public function repairItems()
+{
+    return $this->hasMany(CarServiceRepairItems::class)
+        ->withTrashed(); // Include soft deleted items
+}
+
+// 8. Conditional queries with soft deletes
+$items = CarServiceRepairItems::where('job_number', 'JOB001')
+    ->withTrashed()
+    ->get();
+Example with your existing event handlers:
+
+php
+
+Copy
+class CarServiceRepairItems extends Model
+{
+    use SoftDeletes;
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Fires when soft deleting
+        static::deleting(function($repairItem) {
+            // Your logic before soft delete
+        });
+
+        // Fires only on force delete
+        static::forceDeleting(function($repairItem) {
+            // Your logic before permanent deletion
+        });
+
+        // Fires when restoring
+        static::restoring(function($repairItem) {
+            // Your logic before restore
+        });
+    }
+}
+Example with your sales records:
+
+php
+
+Copy
+class CarServiceRepairItems extends Model
+{
+    use SoftDeletes;
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // When soft deleting
+        static::deleting(function($repairItem) {
+            if ($repairItem->isForceDeleting()) {
+                // This is a force delete
+                $repairItem->deactivateSalesRecord();
+                $repairItem->updateInvoiceTotals();
+            } else {
+                // This is a soft delete
+                if ($repairItem->type === 'parts') {
+                    CarServicePartsSale::where('repair_item_id', $repairItem->id)
+                        ->update([
+                            'status' => 'inactive',
+                            'deleted_at' => Carbon::now()
+                        ]);
+                } else if ($repairItem->type === 'repair') {
+                    CarServiceServiceSale::where('repair_item_id', $repairItem->id)
+                        ->update([
+                            'status' => 'inactive',
+                            'deleted_at' => Carbon::now()
+                        ]);
+                }
+                $repairItem->updateInvoiceTotals();
+            }
+        });
+
+        // When restoring
+        static::restoring(function($repairItem) {
+            if ($repairItem->type === 'parts') {
+                CarServicePartsSale::withTrashed()
+                    ->where('repair_item_id', $repairItem->id)
+                    ->update([
+                        'status' => 'active',
+                        'deleted_at' => null
+                    ]);
+            } else if ($repairItem->type === 'repair') {
+                CarServiceServiceSale::withTrashed()
+                    ->where('repair_item_id', $repairItem->id)
+                    ->update([
+                        'status' => 'active',
+                        'deleted_at' => null
+                    ]);
+            }
+            $repairItem->updateInvoiceTotals();
+        });
+    }
+}
+This setup:
+
+Keeps deleted records in the database but marks them as deleted
+Allows you to restore deleted records
+Maintains referential integrity
+Provides flexibility in querying deleted/non-deleted records
+Handles related records appropriately
+Would you like me to explain any specific aspect in more detail?
